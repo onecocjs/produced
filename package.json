@@ -1,0 +1,29 @@
+{
+  "name": "@onecocjs/produced",
+  "version": "1.0.0",
+  "description": "swagger api generate to ts",
+  "main": "index.js",
+  "scripts": {
+    "build": "npx lub",
+    "build:w": "npx lub -w"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/onecocjs/produced.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/onecocjs/produced/issues"
+  },
+  "homepage": "https://github.com/onecocjs/produced#readme",
+  "devDependencies": {
+    "@dura/lub": "^4.0.0-alpha.11",
+    "@types/mustache": "^4.0.1"
+  },
+  "dependencies": {
+    "mustache": "^4.0.1",
+    "prettier": "^2.1.2",
+    "superagent": "^6.1.0"
+  }
+}

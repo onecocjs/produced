@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "Node",
+    "target": "ES5",
+    "esModuleInterop": true,
+    "jsx": "react",
+    "sourceMap": true,
+    "noEmitOnError": true,
+    "allowSyntheticDefaultImports": true,
+    "declaration": true,
+    "declarationDir": "lib"
+  },
+  "include": ["src", "services"],
+  "exclude": ["node_modules", "__tests__"]
+}
