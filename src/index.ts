@@ -6,7 +6,7 @@ import Mustache from "mustache";
 import prettier from "prettier";
 import { replaceAllGroup, convertType } from "./utils";
 
-async function run() {
+export async function run() {
   const config = await require(`${process.cwd()}/.producedrc.ts`);
 
   const swagger = await fetchApiJsonSchemas({
@@ -17,9 +17,20 @@ async function run() {
   const paths = swagger.paths;
   const tags = swagger.tags.map((n) => n.name);
 
-  const res = chain(schemas).values().map(getDefine).reduce(merge).value();
+  const res = chain(schemas).values().map(getDefine).value();
   const api = findApi(paths);
-  console.log(api);
+
+  chain(res)
+    .forEach((n) => {
+      const serviceFilePath = `${process.cwd()}/${config.output}/schemas/${
+        n.name
+      }.d.ts`;
+
+      ensureFileSync(serviceFilePath);
+      writeFileSync(serviceFilePath, n.formatCode);
+    })
+    .value();
+
   chain(tags)
     .forEach((tag) => {
       const serviceFilePath = `${process.cwd()}/${
@@ -27,17 +38,7 @@ async function run() {
       }/${tag}Services.ts`;
       const t = `
         ${config.imports.join("\r\n")}
-
         {{#operations}}
-
-          {{#requestTS}}
-              {{{requestTS}}}
-          {{/requestTS}}
-
-          {{#responseTS}}
-              {{{responseTS}}}
-          {{/responseTS}}
-
           {{#description}}
           /** {{description}} */
           {{/description}}
@@ -46,16 +47,11 @@ async function run() {
               params:{{request}}
               {{/request}}
           )
-          {{#response}}
-          :{{response}} 
-          {{/response}}
           {
-              return {{fn}}(
-                  "{{{url}}}"
+              return {{fn}}{{#response}}<{{{response}}}>{{/response}} ('{{{url}}}'
                   {{#request}}
                   ,params
-                  {{/request}}
-              )
+                  {{/request}})
           }
         {{/operations}}
       `;
@@ -70,18 +66,8 @@ async function run() {
             request: requestBody?.content
               ? getRefName(requestBody.content["application/json"].schema.$ref)
               : null,
-            requestTS: requestBody?.content
-              ? res[
-                  getRefName(
-                    requestBody.content["application/json"].schema.$ref
-                  )
-                ]
-              : null,
             response: responses?.[200]?.content
               ? getRefName(responses[200].content["*/*"].schema.$ref)
-              : null,
-            responseTS: responses?.[200]?.content
-              ? res[getRefName(responses[200].content["*/*"].schema.$ref)]
               : null,
           };
         }
@@ -89,7 +75,7 @@ async function run() {
       const code = Mustache.render(t, { operations: fns });
       const formatCode = prettier.format(code);
 
-      writeFileSync(serviceFilePath, formatCode);
+      writeFileSync(serviceFilePath, code);
     })
     .value();
 
@@ -114,7 +100,7 @@ function findApi(paths) {
     .value();
 }
 
-function getDefine({ title, required, type, properties, description }) {
+function getDefine({ title, required, properties, description }) {
   const t = `
   {{#description}}
   /** {{description}} */
@@ -136,7 +122,7 @@ function getDefine({ title, required, type, properties, description }) {
     fields,
   });
   const formatCode = prettier.format(code);
-  return { [_name]: formatCode };
+  return { name: _name, formatCode };
 }
 
 function getRefName(path: string) {
@@ -180,5 +166,3 @@ function getFields(properties, required = []) {
     })
     .value();
 }
-
-run();
