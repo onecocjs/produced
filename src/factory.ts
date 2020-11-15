@@ -2,104 +2,149 @@ import superagent from "superagent";
 import { writeFileSync, readFileSync } from "fs";
 import Mustache from "mustache";
 import prettier from "prettier";
+import { chain } from "lodash";
+import { replaceAllGroup, convertType } from "./utils";
+import { exec } from "child_process";
 
 const $REF = "$ref";
 
-export interface FetchSwaggerSchemas {
-  url: string;
-}
-
-declare namespace Swagger {
-  type SchemasType = "string" | "object" | "integer" | "array";
-
-  interface SchemasProperties {
-    type: SchemasType;
-  }
-
-  interface Schemas {
-    title: "string";
-    type: SchemasType;
-    required?: string[];
-    properties?: {
-      type: SchemasType;
-      description: string;
-    };
+function refLastNodeName(path: string) {
+  if (path.startsWith("#")) {
+    return chain(path).split("/").last().value();
+  } else {
+    throw new Error("非法的ref路径！");
   }
 }
 
-export function hasRefObjectFn(target: any = {}) {
-  return Object.entries(target).some(([k, v]) => k === $REF || v[$REF]);
-}
-
-export function hasRefArrayFn(target: any = {}) {
-  return Object.entries(target).some(
-    ([k, v]) => (k === "items" && v[$REF]) || (v["items"] && v["items"][$REF])
-  );
-}
-
-export function convertType(type: string) {
-  switch (type) {
-    case "integer":
-      return "number";
-    case "array":
-      return "[]";
-    default:
-      return type;
-  }
-}
-
-export async function fetchApiJsonSchemas(params: FetchSwaggerSchemas) {
-  const {
-    components: { schemas },
-  } = await superagent
+export async function fetchApiJsonSchemas(params) {
+  const swagger = await superagent
     .get(params.url)
     .send()
     .then(({ text }) => text)
     .then(JSON.parse);
-
-  function getAtomSchemas() {
-    return Object.entries(schemas)
-      .filter(([k, v]: [string, Swagger.Schemas]) => {
-        if (JSON.stringify(v?.properties ?? {}).includes($REF)) {
-          return false;
-        }
-        // if (hasRefObjectFn(v?.properties ?? {})) {
-        //   return false;
-        // }
-        // if (hasRefArrayFn(v?.properties ?? {})) {
-        //   return false;
-        // }
-        return true;
-      })
-      .map(([k, v]) => ({ [k]: v }))
-      .reduce((prev, next) => ({ ...prev, ...next }), {});
-  }
+  return swagger;
 
   return {
     getSchemas: async function () {
-      const t = await readFileSync("template/properties", "utf-8");
-      const i = await readFileSync("template/interface", "utf-8");
+      exec("rm -rf /Users/ityuany/GitRepository/produced/services/bean/*");
+      exec("rm -rf /Users/ityuany/GitRepository/produced/services/*.ts");
 
-      Object.entries(getAtomSchemas()).forEach(([k, v]: [string, any]) => {
-        const fields = Object.entries(v?.properties ?? {}).map(
-          ([nk, nv]: [string, any]) => ({
-            description: nv.description,
-            name: nk.replace(/«/g, "").replace(/»/g, ""),
-            type: convertType(nv.type),
-          })
-        );
+      const i = await readFileSync("template/interface.mu", "utf-8");
+      const operationsTemplate = await readFileSync(
+        "template/operations.mu",
+        "utf-8"
+      );
 
-        const code = Mustache.render(i, {
-          description: v.description,
-          name: k.replace(/«/g, "").replace(/»/g, ""),
-          fields,
-        });
+      chain(swagger.components.schemas)
+        .entries()
+        .forEach(([, n]) => {
+          const interfaceName = replaceAllGroup(n.title, [
+            [/«/g, "Of"],
+            [/»/g, ""],
+          ]);
+          if (n.type === "object") {
+            const res = Mustache.render(i, {
+              description: n.description,
+              name: interfaceName,
+              fields: chain(n.properties)
+                .entries()
+                .map(([fk, fn]) => {
+                  const field = {
+                    description: fn.description,
+                    name: replaceAllGroup(fk, [
+                      [/«/g, "Of"],
+                      [/»/g, ""],
+                    ]),
+                    type: convertType(fn.type),
+                  };
 
-        writeFileSync(
-          `services/bean/${k.replace(/«/g, "").replace(/»/g, "")}.d.ts`,
-          prettier.format(code)
-        );
-      });
+                  if (fn.type === "array") {
+                    if (fn.items[$REF]) {
+                      return {
+                        ...field,
+                        type: `${refLastNodeName(fn.items[$REF])}[]`,
+                      };
+                    }
+                    return {
+                      ...field,
+                      type: `${convertType(fn.items.type)}[]`,
+                    };
+                  }
+                  if (fn[$REF]) {
+                    return {
+                      ...field,
+                      type: replaceAllGroup(refLastNodeName(fn[$REF]), [
+                        [/«/g, "Of"],
+                        [/»/g, ""],
+                      ]),
+                    };
+                  }
+
+                  return field;
+                })
+                .value(),
+            });
+
+            writeFileSync(
+              `services/bean/${interfaceName}.d.ts`,
+              prettier.format(res)
+            );
+          }
+        })
+        .value();
+
+      const operationsMap = chain(swagger.paths)
+        .entries()
+        .map(([k, v]) => {
+          return chain(v)
+            .mapValues()
+            .map((o) => ({ ...o, path: k, tag: o.tags[0] }))
+            .value();
+        })
+        .flatMap()
+        .groupBy((n) => n.tag)
+        .value();
+
+      chain(operationsMap)
+        .entries()
+        .forEach(([k, v]) => {
+          const ss = v["map"]((n) => ({
+            url: n.path,
+            description: n.summary,
+            name: n.operationId,
+            request: n?.requestBody?.content?.["application/json"]?.schema?.[
+              $REF
+            ]
+              ? replaceAllGroup(
+                  refLastNodeName(
+                    n.requestBody.content["application/json"].schema[$REF]
+                  ),
+                  [
+                    [/«/g, "Of"],
+                    [/»/g, ""],
+                  ]
+                )
+              : null,
+            response: n?.responses?.[200]?.content?.["*/*"]?.schema?.[$REF]
+              ? replaceAllGroup(
+                  refLastNodeName(n.responses[200].content["*/*"].schema[$REF]),
+                  [
+                    [/«/g, "Of"],
+                    [/»/g, ""],
+                  ]
+                )
+              : null,
+          }));
+
+          writeFileSync(
+            `services/${k}Services.ts`,
+            prettier.format(
+              "let fetchGet:any = null" +
+                Mustache.render(operationsTemplate, { operations: ss })
+            )
+          );
+        })
+        .value();
     },
   };
 }

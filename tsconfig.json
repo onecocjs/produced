@@ -7,7 +7,7 @@
     "sourceMap": true,
     "noEmitOnError": true,
     "allowSyntheticDefaultImports": true,
-    "declaration": true,
+    "declaration": false,
     "declarationDir": "lib"
   },
   "include": ["src", "services"],
