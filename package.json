@@ -1,8 +1,8 @@
 {
   "name": "@onecocjs/produced-ts",
-  "version": "1.0.0",
+  "version": "1.0.0-alpha.1",
   "description": "swagger api generate to ts",
-  "main": "index.js",
+  "main": "./lib/index.js",
   "scripts": {
     "build": "npx lub",
     "ts": "npx openapi-typescript http://127.0.0.1:8888/v3/api-docs --output petstore.ts",
