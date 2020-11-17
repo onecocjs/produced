@@ -67,7 +67,9 @@ export async function run() {
               ? getRefName(requestBody.content["application/json"].schema.$ref)
               : null,
             response: responses?.[200]?.content
-              ? getRefName(responses[200].content["*/*"].schema.$ref)
+              ? getRefName(
+                  responses[200].content["application/json"].schema.$ref
+                )
               : null,
           };
         }
