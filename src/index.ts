@@ -1,7 +1,14 @@
 import { fetchApiJsonSchemas } from "./factory";
 import { readFileSync } from "fs";
 import { ensureDirSync, ensureFileSync, writeFileSync } from "fs-extra";
-import { chain, merge, entries, values } from "lodash";
+import {
+  chain,
+  merge,
+  entries,
+  upperFirst,
+  templateSettings,
+  template,
+} from "lodash";
 import Mustache from "mustache";
 import prettier from "prettier";
 import { replaceAllGroup, convertType } from "./utils";
@@ -39,13 +46,27 @@ export async function run() {
       const t = `
         ${config.imports.join("\r\n")}
         {{#operations}}
+
+          interface {{queryType}}{
+            {{#queryParam}}
+              {{name}}:{{schema.type}}
+            {{/queryParam}}
+          }
+
+          interface {{pathType}}{
+            {{#pathParam}}
+              {{name}}:{{schema.type}}
+            {{/pathParam}}
+          }
+
+
           {{#description}}
           /** {{description}} */
           {{/description}}
           export function {{name}}(
               {{#request}}
-              params:{{request}}
-              {{/request}}
+              params:{{request}},
+              {{/request}} 
           )
           {
               return {{fn}}{{#response}}<{{{response}}}>{{/response}} ('{{{url}}}'
@@ -56,28 +77,56 @@ export async function run() {
         {{/operations}}
       `;
 
+      templateSettings.interpolate = /{([\s\S]+?)}/g;
+
       const fns = api[tag].map(
-        ({ summary, operationId, requestBody, url, responses, method }) => {
+        ({
+          summary,
+          operationId,
+          requestBody,
+          url,
+          responses,
+          method,
+          parameters,
+        }) => {
+          const request =
+            requestBody?.content?.["application/json"]?.schema?.$ref ?? null;
+          const pathParam = parameters?.filter((n) => n.in === "path");
+          const queryParam = parameters?.filter((n) => n.in === "query");
+
+          const compiled = template(url);
+          const data = pathParam
+            ?.map((n) => {
+              return {
+                [n.name]: "${" + n.name + "}",
+              };
+            })
+            .reduce(merge);
+          const response =
+            responses?.[200]?.content?.["*/*"]?.schema?.$ref ?? null;
+
           return {
+            queryType: upperFirst(operationId) + "Query",
+            pathType: upperFirst(operationId) + "Path",
+            pathParam: pathParam,
+            queryParam: queryParam,
             description: summary,
             name: operationId,
             url: url,
             fn: config.functionDefineTemplate[method],
-            request: requestBody?.content
-              ? getRefName(requestBody.content["application/json"].schema.$ref)
-              : null,
-            response: responses?.[200]?.content
-              ? getRefName(
-                  responses[200].content["application/json"].schema.$ref
-                )
-              : null,
+            request: request ? getRefName(request) : null,
+            response: response ? getRefName(response) : null,
           };
         }
       );
       const code = Mustache.render(t, { operations: fns });
-      const formatCode = prettier.format(code);
 
-      writeFileSync(serviceFilePath, code);
+      const formatCode = prettier.format(code, {
+        semi: false,
+        parser: "typescript",
+      });
+
+      writeFileSync(serviceFilePath, formatCode);
     })
     .value();
 
@@ -112,11 +161,12 @@ function getDefine({ title, required, properties, description }) {
           {{#description}}
           /** {{description}} */
           {{/description}}
-          {{name}}:{{type}};
+          {{name}}{{#optional}}?{{/optional}}:{{type}};
       {{/fields}}
   }`;
 
   const fields = getFields(properties, required);
+
   const _name = rename(title);
   const code = Mustache.render(t, {
     description,
@@ -150,7 +200,7 @@ function getFields(properties, required = []) {
         name: rename(name),
         description,
         type,
-        required: required.some((n) => n === name),
+        optional: !required.some((n) => n === name),
       };
 
       if (type === "array" && items) {
@@ -160,7 +210,7 @@ function getFields(properties, required = []) {
           field.type = `${getRefName(items.$ref)}[]`;
         }
       } else if ($ref) {
-        field.type = `${getRefName($ref)}[]`;
+        field.type = `${getRefName($ref)}`;
       } else {
         field.type = convertType(type);
       }
